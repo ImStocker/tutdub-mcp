@@ -1,0 +1,55 @@
+{
+  "name": "tutdub-mcp",
+  "version": "1.0.0",
+  "description": "MCP server and CLI client for the TutDub video dubbing service",
+  "license": "MIT",
+  "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ImStocker/tutdub-mcp.git"
+  },
+  "homepage": "https://github.com/ImStocker/tutdub-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/ImStocker/tutdub-mcp/issues"
+  },
+  "bin": {
+    "tutdub-mcp": "src/cli.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE",
+    ".env.example"
+  ],
+  "scripts": {
+    "start": "bun src/cli.ts",
+    "serve": "bun src/cli.ts serve",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "smoke": "bun test/mcp-smoke.ts",
+    "build:bin:win": "bun build --compile --target=bun-windows-x64 src/cli.ts --outfile dist/tutdub-mcp-windows-x64.exe",
+    "build:bin:linux": "bun build --compile --target=bun-linux-x64 src/cli.ts --outfile dist/tutdub-mcp-linux-x64",
+    "build:bin:mac": "bun build --compile --target=bun-darwin-x64 src/cli.ts --outfile dist/tutdub-mcp-macos-x64 && bun build --compile --target=bun-darwin-arm64 src/cli.ts --outfile dist/tutdub-mcp-macos-arm64",
+    "build:bin": "bun run build:bin:win && bun run build:bin:linux && bun run build:bin:mac",
+    "prepublishOnly": "bun run typecheck && bun test"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.25.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0",
+    "typescript": "^5.9.0"
+  },
+  "engines": {
+    "bun": ">=1.1.0"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "tutdub",
+    "dubbing",
+    "video",
+    "translation"
+  ]
+}

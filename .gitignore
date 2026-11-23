@@ -1,0 +1,6 @@
+node_modules/
+*.log
+dist/
+.bun-cache/
+.env
+.env.local
