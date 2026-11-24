@@ -8,6 +8,8 @@
  *   tutdub-mcp upload <file> --lang es,fr [--title T] [--source-lang auto]
  *                        [--duration N] [--json]
  *   tutdub-mcp dub <videoId> --lang es,fr
+ *   tutdub-mcp translate <videoId> --lang es,fr   (synonym of dub)
+ *   tutdub-mcp transcribe <file|videoId> [--lang source|es]
  *   tutdub-mcp status <videoId> [--watch]
  *   tutdub-mcp list
  *   tutdub-mcp download <videoId> [--lang es] [--format video|audio|srt|original]
@@ -22,12 +24,14 @@ import { login, logout, whoami } from './auth';
 import { getSettings } from './config';
 import { serveMcp } from './mcp';
 import { contentTypeFor } from './media';
+import { existsSync } from 'node:fs';
 import {
   createContext,
   toolDownload,
   toolGetStatus,
   toolListVideos,
   toolStartDub,
+  toolTranscribe,
   toolUpload,
 } from './tools';
 
@@ -144,6 +148,14 @@ Usage:
 
   tutdub-mcp dub <videoId> --lang es,fr
       Add target languages to an uploaded video.
+  tutdub-mcp translate <videoId> --lang es,fr
+      Synonym of "dub" (translate = dub video/audio).
+
+  tutdub-mcp transcribe <file|videoId> [--lang source|es] [--watch] [--json]
+      Generate subtitles only - no dubbed media. Without --lang (or with
+      "source") the transcription comes out in the source language; pass a
+      language code for a text translation. Uploads the file when given a
+      path, otherwise requests subtitles for the existing video.
 
   tutdub-mcp status <videoId> [--watch]
       Show processing status (per-language jobs).
@@ -234,7 +246,8 @@ async function main(): Promise<void> {
       if (flags['watch'] === true) await withStatusWatch(video.id, overrides);
       return;
     }
-    case 'dub': {
+    case 'dub':
+    case 'translate': {
       const videoId = positional[0];
       if (!videoId) fail('Usage: tutdub-mcp dub <videoId> --lang es,fr');
       const ctx = createContext(overrides);
@@ -245,6 +258,40 @@ async function main(): Promise<void> {
       if (flags['json'] === true) printJson(result);
       else console.log(result.video.id);
       if (flags['watch'] === true) await withStatusWatch(videoId, overrides);
+      return;
+    }
+    case 'transcribe': {
+      const target = positional[0];
+      if (!target) {
+        fail('Usage: tutdub-mcp transcribe <file|videoId> [--lang source|es]');
+      }
+      const durationRaw = str(flags, 'duration');
+      const duration =
+        durationRaw !== undefined ? Number(durationRaw) : undefined;
+      if (duration !== undefined && (!Number.isFinite(duration) || duration < 1)) {
+        fail(`--duration must be a positive number of seconds (got "${durationRaw}")`);
+      }
+      const ctx = createContext(overrides);
+      // A path that exists on disk -> upload; anything else -> existing id.
+      const isFile = existsSync(target);
+      const result = await toolTranscribe(ctx, {
+        path: isFile ? target : undefined,
+        videoId: isFile ? undefined : target,
+        language: str(flags, 'lang'),
+        sourceLang: str(flags, 'source-lang'),
+        title: str(flags, 'title'),
+        duration,
+      });
+      if (flags['json'] === true) printJson(result);
+      else {
+        console.log(result.videoId);
+        console.error(
+          `Subtitles requested for "${result.language}" (${result.videos}) - id ${result.videoId}`,
+        );
+      }
+      if (flags['watch'] === true) {
+        await withStatusWatch(result.videoId, overrides);
+      }
       return;
     }
     case 'status': {

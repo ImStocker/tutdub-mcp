@@ -31,14 +31,15 @@ try {
   console.log('tools:', names.join(', '));
 
   const expected = [
-    'cancel_video',
-    'delete_video',
+    'cancel_media',
+    'delete_media',
     'download_result',
     'get_download_urls',
     'get_status',
-    'list_videos',
+    'list_media',
     'start_dub',
-    'upload_video',
+    'transcribe_media',
+    'upload_media',
     'whoami',
   ];
   const missing = expected.filter((n) => !names.includes(n));

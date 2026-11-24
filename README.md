@@ -109,8 +109,14 @@ tutdub-mcp logout
 # Upload a file and start dubbing; prints the video id
 tutdub-mcp upload ./lesson.mp4 --lang es,fr --watch
 
-# Add more languages later
+# Add more languages later ("translate" is a synonym of "dub")
 tutdub-mcp dub <videoId> --lang de
+tutdub-mcp translate <videoId> --lang de
+
+# Subtitles only - no dubbed media: transcribe, or translate the text
+tutdub-mcp transcribe ./lesson.mp4 --watch          # source-language .srt
+tutdub-mcp transcribe ./lesson.mp4 --lang es        # translated .srt
+tutdub-mcp transcribe <videoId>                     # subtitles for an existing video
 
 # Check progress (per-language jobs, errors, subtitles flag)
 tutdub-mcp status <videoId>
@@ -122,7 +128,8 @@ tutdub-mcp list
 # Download results: dubbed video, audio track, subtitles, or source
 tutdub-mcp download <videoId> --lang es --format video
 tutdub-mcp download <videoId> --lang es --format audio
-tutdub-mcp download <videoId> --lang es --format srt
+tutdub-mcp download <videoId> --lang es --format srt     # translated subs
+tutdub-mcp download <videoId> --lang source --format srt # transcription
 tutdub-mcp download <videoId> --format original
 
 # Account
@@ -162,14 +169,15 @@ too.
 | Tool | Purpose |
 | --- | --- |
 | `whoami` | Check login status / account |
-| `upload_video` | Upload a local file → starts dubbing, returns `videoId` |
-| `start_dub` | Add target languages to an uploaded video |
+| `upload_media` | Upload a local **video or audio** file → starts dubbing, returns `videoId` |
+| `start_dub` | **Translate/dub** an uploaded video or audio file into more languages (the "translate" entry point; text-only translation = `transcribe_media`) |
+| `transcribe_media` | **Subtitles only, no media**: upload a video/audio file or use an existing `videoId`; `language: "source"` (default) = transcription, any other code = translated text |
 | `get_status` | Per-language job progress, errors, `.srt` availability, file expiry |
-| `list_videos` | List account videos |
+| `list_media` | List account uploads (video and audio) |
 | `get_download_urls` | Short-lived presigned URL for `video` / `audio` / `srt` / `original` |
-| `download_result` | Download a result file to this machine (returns path + size) |
-| `cancel_video` | Cancel processing (refunds unfinished work) |
-| `delete_video` | Delete a video and its files |
+| `download_result` | Download a result file to this machine (returns path + size); subtitles via `format: "srt"` + `language: "source"` or a target code |
+| `cancel_media` | Cancel processing (refunds unfinished work) |
+| `delete_media` | Delete an upload and its files |
 
 Upload options mirror the web app: `clean`, `clone`, `removeNoise`,
 `adaptVideo`, `adaptAudioTimeline` (default on; sent inverted to the

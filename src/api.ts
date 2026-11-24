@@ -81,6 +81,11 @@ export interface PublicJob {
   error: string | null;
   /** True when the worker produced an .srt for this language. */
   subtitles?: boolean;
+  /**
+   * Subtitle-only job (no dubbed media). `language` is the pseudo-code
+   * `source` for source-language subtitles.
+   */
+  subtitlesOnly?: boolean;
 }
 
 export interface Video {
@@ -132,6 +137,13 @@ export interface UploadOptions {
   adaptTimingAudio?: boolean;
   emailNotify?: boolean;
   scenario?: string;
+  /**
+   * Subtitle-only jobs: the worker stops after transcription/refinement and
+   * produces .srt files only (no dubbed media). With `languages: []` the
+   * subtitles come out in the (possibly auto-detected) source language as
+   * the `source-srt` file variant.
+   */
+  subtitlesOnly?: boolean;
 }
 
 export interface CliSession {

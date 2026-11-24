@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { uploadVideo } from '../src/upload';
 import { probeDuration } from '../src/media';
+import { toolTranscribe, type ToolContext } from '../src/tools';
 
 function makeWavFile(dir: string, seconds: number): string {
   const byteRate = 176400; // 44.1kHz stereo 16-bit
@@ -36,6 +37,7 @@ interface MockState {
   completed: { key: string; uploadId: string } | null;
   aborted: boolean;
   partsReceived: Set<number>;
+  reprocessed: { languages: string[]; subtitlesOnly?: boolean } | null;
 }
 
 function startMockUploadServer(): { url: string; state: MockState; stop: () => void } {
@@ -44,6 +46,7 @@ function startMockUploadServer(): { url: string; state: MockState; stop: () => v
     completed: null,
     aborted: false,
     partsReceived: new Set(),
+    reprocessed: null,
   };
 
   const server = Bun.serve({
@@ -101,6 +104,15 @@ function startMockUploadServer(): { url: string; state: MockState; stop: () => v
       if (url.pathname === '/videos/uploads/abort' && req.method === 'POST') {
         state.aborted = true;
         return json({ success: true });
+      }
+
+      const reprocessMatch = /^\/videos\/[^/]+\/reprocess$/.exec(url.pathname);
+      if (reprocessMatch && req.method === 'POST') {
+        state.reprocessed = (await req.json()) as {
+          languages: string[];
+          subtitlesOnly?: boolean;
+        };
+        return json({ success: true, video: {} });
       }
 
       return json({ error: 'Not found', code: 'NOT_FOUND' }, 404);
@@ -201,6 +213,50 @@ describe('uploadVideo (integration)', () => {
       }),
     ).rejects.toThrow(/--duration/);
     // Never reached the server.
+    expect(mock.state.started).toBeNull();
+  });
+
+  test('toolTranscribe uploads with subtitlesOnly and empty languages', async () => {
+    const file = makeWavFile(dir, 1);
+    const ctx: ToolContext = {
+      settings: { server: mock.url, frontend: 'http://front', token: 'td_cli_test' },
+    };
+
+    const result = await toolTranscribe(ctx, { path: file });
+
+    expect(result.videoId).toBe('video-123');
+    expect(result.videos).toBe('uploaded');
+    expect(result.language).toBe('source');
+    expect(mock.state.reprocessed).toBeNull();
+
+    const started = mock.state.started as {
+      languages: string[];
+      options: { subtitlesOnly?: boolean };
+    };
+    expect(started.languages).toEqual([]);
+    expect(started.options.subtitlesOnly).toBe(true);
+  });
+
+  test('toolTranscribe requests subtitles for an existing video', async () => {
+    const ctx: ToolContext = {
+      settings: { server: mock.url, frontend: 'http://front', token: 'td_cli_test' },
+    };
+
+    const result = await toolTranscribe(ctx, {
+      videoId: 'video-123',
+      language: 'de',
+    });
+
+    expect(result).toEqual({
+      videoId: 'video-123',
+      language: 'de',
+      videos: 'existing',
+    });
+    // Translated subtitles for one target language, subtitle-only mode.
+    expect(mock.state.reprocessed).toEqual({
+      languages: ['de'],
+      subtitlesOnly: true,
+    });
     expect(mock.state.started).toBeNull();
   });
 });

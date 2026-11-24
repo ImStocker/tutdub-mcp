@@ -24,6 +24,7 @@ describe('variantFor', () => {
     expect(variantFor('video', 'de')).toBe('de');
     expect(variantFor('audio', 'de')).toBe('de-audio');
     expect(variantFor('srt', 'de')).toBe('de-srt');
+    expect(variantFor('srt', 'source')).toBe('source-srt');
     expect(variantFor('original')).toBe('original');
   });
   test('requires a language for language-scoped formats', () => {
