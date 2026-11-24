@@ -1,10 +1,19 @@
 # Publishes a release for every `v*` tag:
 #   1. typecheck + tests (+ MCP smoke test)
 #   2. cross-compile standalone binaries (Windows / Linux / macOS x64+arm64)
-#   3. publish the npm package (skipped if the version already exists)
+#   3. publish the npm package via Trusted Publishing (OIDC — no token or
+#      repository secret involved)
 #   4. create a GitHub Release with the binaries and sha256sums.txt
 #
-# Requires a repository secret NPM_TOKEN (npm "automation" token).
+# One-time setup on npmjs.com (package must exist — publish v1 manually
+# first if it does not): Settings -> Trusted publishing -> GitHub Actions
+# publisher:
+#     owner:      ImStocker
+#     repository: tutdub-mcp
+#     workflow:   publish.yml
+#     environment: (leave empty)
+# The identity must match this workflow EXACTLY, otherwise `npm publish`
+# fails with E404 even though the package exists.
 
 name: Release
 
@@ -14,20 +23,24 @@ on:
       - 'v*'
 
 permissions:
-  contents: write
+  contents: write # create the GitHub Release and upload assets
+  id-token: write # OIDC for npm Trusted Publishing (replaces NPM_TOKEN)
 
 jobs:
   release:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: oven-sh/setup-bun@v2
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '24'
           registry-url: 'https://registry.npmjs.org'
+          # Recommended for publish workflows: an npm cache poisoning could
+          # otherwise expose the OIDC token to attacker-controlled code.
+          package-manager-cache: false
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -64,16 +77,23 @@ jobs:
           sha256sum tutdub-mcp-"${GITHUB_REF_NAME}"-* > sha256sums.txt
           ls -la
 
-      - name: Publish to npm (skip when the version already exists)
+      - name: Publish to npm via Trusted Publishing (skip when the version already exists)
         run: |
+          NPM_V="$(npm --version)"
+          echo "npm $NPM_V on $(node --version)"
+          # Trusted Publishing silently fails on old npm; make it explicit.
+          if [ "$(printf '%s\n' 11.5.1 "$NPM_V" | sort -V | head -n1)" != "11.5.1" ]; then
+            echo "npm < 11.5.1 - upgrading for Trusted Publishing support"
+            npm install -g npm@latest
+          fi
           VER="$(node -p "require('./package.json').version")"
           if npm view "tutdub-mcp@$VER" version >/dev/null 2>&1; then
             echo "tutdub-mcp@$VER is already on npm - skipping publish"
           else
+            # No NODE_AUTH_TOKEN: npm exchanges the workflow's OIDC token
+            # with the trusted publisher configured on npmjs.com.
             npm publish
           fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release with the binaries
         env:
