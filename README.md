@@ -1,4 +1,4 @@
-# tutdub-mcp
+# TutDub MCP Server and CLI
 
 A small command-line utility and **MCP server** for [TutDub](https://tutdub.com) —
 upload a video, dub it into other languages, and download the results —
