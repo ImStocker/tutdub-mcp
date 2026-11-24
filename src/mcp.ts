@@ -133,7 +133,9 @@ export function createServer(): McpServer {
       '(mp3, wav, m4a, …; audio is processed as audio) — to TutDub and ' +
       'starts dubbing into the given target languages. Returns the video ' +
       'id used by the other tools. Requires credits; duration is probed ' +
-      'from the file (pass duration explicitly if probing fails).',
+      'from the file (pass duration explicitly if probing fails). A poster ' +
+      'thumbnail is captured from the OS automatically (captureThumbnail ' +
+      'to disable, thumbnailPath to supply your own image).',
     inputSchema: {
       path: z.string().describe('Absolute or relative path to the media file'),
       languages: z.array(LANG).min(1).max(5).describe('Target language codes'),
@@ -147,6 +149,20 @@ export function createServer(): McpServer {
         .min(1)
         .optional()
         .describe('Duration in seconds (overrides probing)'),
+      thumbnailPath: z
+        .string()
+        .optional()
+        .describe(
+          'Local image (jpg/png/…, <=512 KB) to use as the video poster; ' +
+            'overrides the automatic capture',
+        ),
+      captureThumbnail: z
+        .boolean()
+        .optional()
+        .describe(
+          'Auto-capture a poster thumbnail from the OS (default true; ' +
+            'false = upload without one)',
+        ),
       options: OPTIONS,
     },
   };
@@ -211,6 +227,20 @@ export function createServer(): McpServer {
         .min(1)
         .optional()
         .describe('Duration in seconds, overrides probing (upload path only)'),
+      thumbnailPath: z
+        .string()
+        .optional()
+        .describe(
+          'Local image (jpg/png/…, <=512 KB) poster for the upload; ' +
+            'overrides the automatic capture',
+        ),
+      captureThumbnail: z
+        .boolean()
+        .optional()
+        .describe(
+          'Auto-capture a poster thumbnail from the OS (default true; ' +
+            'false = upload without one)',
+        ),
       options: SUBS_OPTIONS,
     },
   };

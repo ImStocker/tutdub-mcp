@@ -12,7 +12,8 @@ import {
   type UploadSession,
   type Video,
 } from './api';
-import { contentTypeFor, probeDuration } from './media';
+import { contentTypeFor, isAudioContentType, probeDuration } from './media';
+import { captureThumbnail, MAX_THUMBNAIL_BYTES } from './thumbnail';
 
 const CONCURRENCY = 3;
 const PART_RETRIES = 3;
@@ -30,8 +31,16 @@ export interface UploadInput {
   title?: string;
   /** Overrides the probed duration (seconds). */
   duration?: number;
+  /**
+   * Poster data URL for the server. `undefined` (default) auto-captures
+   * one from the OS/cover art for video files, `null` skips the capture,
+   * a string is used as-is (validated against the server limit).
+   */
+  thumbnail?: string | null;
   options?: UploadOptions;
   onProgress?: (percent: number) => void;
+  /** Informational sink (poster source/size, ...). */
+  onInfo?: (line: string) => void;
 }
 
 async function putPart(url: string, body: Blob): Promise<void> {
@@ -60,6 +69,42 @@ async function putPart(url: string, body: Blob): Promise<void> {
     : new Error('Upload part failed');
 }
 
+/** Validates an explicitly supplied poster against the server rules. */
+function validateExplicitThumbnail(value: string): string {
+  if (!value.startsWith('data:image/')) {
+    throw new Error(
+      `thumbnail must be a data:image/... URL (got "${value.slice(0, 40)}...")`,
+    );
+  }
+  if (value.length > MAX_THUMBNAIL_BYTES) {
+    throw new Error(
+      `thumbnail is too large (${value.length} bytes; the server accepts ` +
+        `at most ${MAX_THUMBNAIL_BYTES})`,
+    );
+  }
+  return value;
+}
+
+/**
+ * Resolves the poster for the start payload. Auto-capture is best-effort
+ * (returns null on any failure) and only runs for non-audio files; an
+ * explicit value is user input, so it is validated and may throw.
+ */
+async function resolveThumbnail(
+  input: UploadInput,
+  contentType: string,
+): Promise<string | null> {
+  if (input.thumbnail === null) return null; // explicitly skipped
+  if (input.thumbnail !== undefined) return validateExplicitThumbnail(input.thumbnail);
+  if (isAudioContentType(contentType)) return null;
+  const captured = await captureThumbnail(input.path);
+  if (!captured) return null;
+  input.onInfo?.(
+    `thumbnail: ${captured.bytes} bytes via ${captured.source}`,
+  );
+  return captured.dataUrl;
+}
+
 /**
  * Uploads the file and completes the session, returning the created video.
  * Aborts the session on failure so no orphaned parts linger in S3.
@@ -81,6 +126,10 @@ export async function uploadVideo(input: UploadInput): Promise<Video> {
     );
   }
 
+  // Poster capture runs after the cheap duration validation so a bad file
+  // never pays for an OS thumbnail spawn.
+  const thumbnail = await resolveThumbnail(input, contentType);
+
   const { upload } = await apiRequest<{ upload: UploadSession }>(
     input.server,
     '/videos/uploads',
@@ -96,6 +145,7 @@ export async function uploadVideo(input: UploadInput): Promise<Video> {
         sourceLang: input.sourceLang || 'auto',
         languages: input.languages,
         options: input.options ?? {},
+        ...(thumbnail ? { thumbnail } : {}),
       },
     },
   );

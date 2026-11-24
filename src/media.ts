@@ -5,6 +5,9 @@
  * (credits = ceil(minutes) per language) and plan limits. We probe the most
  * common containers exactly and fall back to a clear error asking for
  * `--duration` when the container is unknown.
+ *
+ * The same box walk also pulls embedded cover art (`covr`) out of ISO-BMFF
+ * files - a free poster image for uploads when the file carries one.
  */
 
 import { openSync, readSync, closeSync, statSync } from 'node:fs';
@@ -223,4 +226,131 @@ function probeMp3(fd: number, fileSize: number): number | null {
   // (cost is per whole minute) and plan limits.
   const audioBytes = fileSize - offset;
   return (audioBytes * 8) / (kbps * 1000);
+}
+
+// ------------------------------------------------------- embedded cover art
+
+export interface CoverArt {
+  bytes: Buffer;
+  mime: string;
+}
+
+/**
+ * Raw cover bytes are capped well below the server's 512 KiB data-URL
+ * limit (base64 adds ~33%): anything larger is skipped instead of sent.
+ */
+const MAX_COVER_BYTES = 380_000;
+
+interface BoxRange {
+  type: string;
+  /** Offset of the first byte after the box header. */
+  bodyStart: number;
+  /** Offset of the first byte after the box (start of the next box). */
+  end: number;
+}
+
+/** Parses an ISO-BMFF box header at `offset`; null when malformed/truncated. */
+function readBoxHeader(fd: number, offset: number, end: number): BoxRange | null {
+  const header = readAt(fd, offset, 16);
+  if (!header || header.length < 8) return null;
+  let size = header.readUInt32BE(0);
+  const type = header.toString('latin1', 4, 8);
+  let headerSize = 8;
+  if (size === 1) {
+    if (header.length < 16) return null;
+    const big = header.readBigUInt64BE(8);
+    if (big > BigInt(Number.MAX_SAFE_INTEGER)) return null;
+    size = Number(big);
+    headerSize = 16;
+  } else if (size === 0) {
+    size = end - offset; // box extends to the end of its container
+  }
+  if (size < headerSize || offset + size > end) return null;
+  return { type, bodyStart: offset + headerSize, end: offset + size };
+}
+
+/** Finds a direct child box by fourcc within [start, end). */
+function findChildBox(fd: number, start: number, end: number, type: string): BoxRange | null {
+  let offset = start;
+  while (offset + 8 <= end) {
+    const box = readBoxHeader(fd, offset, end);
+    if (!box) return null;
+    if (box.type === type) return box;
+    offset = box.end;
+  }
+  return null;
+}
+
+/** Sniffs the payload of an ilst `data` box into a mime type. */
+function sniffImageMime(bytes: Buffer): string | null {
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return 'image/jpeg';
+  }
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes.toString('latin1', 1, 4) === 'PNG'
+  ) {
+    return 'image/png';
+  }
+  if (bytes.length >= 12 && bytes.toString('latin1', 0, 4) === 'RIFF' &&
+      bytes.toString('latin1', 8, 12) === 'WEBP') {
+    return 'image/webp';
+  }
+  const gif = bytes.toString('latin1', 0, 6);
+  if (bytes.length >= 6 && (gif === 'GIF87a' || gif === 'GIF89a')) return 'image/gif';
+  return null;
+}
+
+/**
+ * Extracts embedded cover art from an ISO-BMFF file
+ * (`moov > udta > meta > ilst > covr`, with `moov > meta` as a fallback
+ * path used by some muxers). Returns null for audio-only extensions,
+ * files without artwork, or anything larger than the server accepts.
+ */
+export function probeCoverArt(filePath: string): CoverArt | null {
+  let fd: number | null = null;
+  try {
+    const stat = statSync(filePath);
+    if (stat.size === 0) return null;
+    fd = openSync(filePath, 'r');
+    const ext = filePath.slice(filePath.lastIndexOf('.')).toLowerCase();
+    if (!['.mp4', '.m4v', '.mov', '.m4a'].includes(ext)) return null;
+
+    const paths = [
+      ['moov', 'udta', 'meta', 'ilst', 'covr'],
+      ['moov', 'meta', 'ilst', 'covr'],
+    ];
+    for (const path of paths) {
+      let node = findChildBox(fd, 0, stat.size, path[0]);
+      if (!node) continue;
+      for (const name of path.slice(1)) {
+        // Descend into `node`: `meta` is a FullBox (version+flags first),
+        // so its child boxes start 4 bytes later.
+        const start = node.type === 'meta' ? node.bodyStart + 4 : node.bodyStart;
+        node = findChildBox(fd, start, node.end, name);
+        if (!node) break;
+      }
+      if (!node) continue;
+
+      // The covr box holds one or more `data` boxes:
+      //   4 bytes version+flags (low 24 bits: 13=JPEG, 14=PNG),
+      //   4 bytes locale, then the image payload.
+      const data = findChildBox(fd, node.bodyStart, node.end, 'data');
+      if (!data) continue;
+      const payloadStart = data.bodyStart + 8;
+      const length = data.end - payloadStart;
+      if (length <= 0 || length > MAX_COVER_BYTES) continue;
+      const bytes = readAt(fd, payloadStart, length);
+      if (!bytes) continue;
+      const mime = sniffImageMime(bytes);
+      if (!mime) continue;
+      return { bytes, mime };
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== null) closeSync(fd);
+  }
 }

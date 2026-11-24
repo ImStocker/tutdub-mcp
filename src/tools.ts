@@ -8,6 +8,7 @@ import { apiRequest, type Video, type UploadOptions } from './api';
 import { getSettings, requireToken, type Settings } from './config';
 import { uploadVideo, type UploadInput } from './upload';
 import { downloadResult, variantFor, type DownloadFormat } from './download';
+import { imageFileToDataUrl } from './thumbnail';
 
 export interface ToolContext {
   settings: Settings;
@@ -18,8 +19,36 @@ export interface ToolContext {
 export function createContext(overrides: {
   server?: string;
   frontend?: string;
+  thumbnail?: boolean;
 }): ToolContext {
   return { settings: getSettings(overrides) };
+}
+
+/**
+ * The server echoes the stored poster back as a base64 data URL (up to
+ * 512 KB of text) that nothing can render in a text-only tool response -
+ * drop it from every Video we return.
+ */
+function withoutPoster<T extends Video>(video: T): T {
+  const { thumbnail: _thumbnail, ...rest } = video;
+  return rest as T;
+}
+
+/**
+ * Poster for an upload: an explicit image path wins, otherwise capture is
+ * on (settings.thumbnail) or off (`captureThumbnail: false`). `undefined`
+ * lets uploadVideo auto-capture, `null` tells it to skip.
+ */
+async function posterFor(args: {
+  thumbnailPath?: string;
+  captureThumbnail?: boolean;
+  settings: Settings;
+}): Promise<string | null | undefined> {
+  if (args.thumbnailPath !== undefined) {
+    return imageFileToDataUrl(args.thumbnailPath);
+  }
+  const capture = args.captureThumbnail ?? args.settings.thumbnail;
+  return capture ? undefined : null;
 }
 
 function auth(ctx: ToolContext): { server: string; token: string } {
@@ -38,6 +67,10 @@ export interface UploadArgs {
   sourceLang?: string;
   title?: string;
   duration?: number;
+  /** Explicit poster image (jpg/png/..., <=512 KB); overrides auto-capture. */
+  thumbnailPath?: string;
+  /** Auto-capture a poster from the OS; defaults to settings.thumbnail (on). */
+  captureThumbnail?: boolean;
   options?: UploadOptions & {
     /**
      * UI-semantics flag (default on): "adapt the audio timeline to the
@@ -58,6 +91,11 @@ export async function toolUpload(
     ...rest,
     adaptTimingAudio: adaptAudioTimeline === undefined ? undefined : !adaptAudioTimeline,
   };
+  const thumbnail = await posterFor({
+    thumbnailPath: args.thumbnailPath,
+    captureThumbnail: args.captureThumbnail,
+    settings: ctx.settings,
+  });
   const input: UploadInput = {
     server,
     token,
@@ -66,10 +104,12 @@ export async function toolUpload(
     sourceLang: args.sourceLang,
     title: args.title,
     duration: args.duration,
+    thumbnail,
     options,
     onProgress: (pct) => ctx.log?.(`upload: ${pct}%`),
+    onInfo: (line) => ctx.log?.(line),
   };
-  return uploadVideo(input);
+  return withoutPoster(await uploadVideo(input));
 }
 
 // --------------------------------------------------------------- dubbing
@@ -80,11 +120,12 @@ export async function toolStartDub(
   args: { videoId: string; languages: string[] },
 ): Promise<{ success: boolean; video: Video }> {
   const { server, token } = auth(ctx);
-  return apiRequest<{ success: boolean; video: Video }>(
+  const result = await apiRequest<{ success: boolean; video: Video }>(
     server,
     `/videos/${encodeURIComponent(args.videoId)}/reprocess`,
     { method: 'POST', token, body: { languages: args.languages } },
   );
+  return { ...result, video: withoutPoster(result.video) };
 }
 
 // ------------------------------------------------------------- transcribe
@@ -102,6 +143,10 @@ export interface TranscribeArgs {
   sourceLang?: string;
   title?: string;
   duration?: number;
+  /** Explicit poster image (jpg/png/..., <=512 KB); upload path only. */
+  thumbnailPath?: string;
+  /** Auto-capture a poster from the OS; defaults to settings.thumbnail (on). */
+  captureThumbnail?: boolean;
   options?: UploadOptions;
 }
 
@@ -125,6 +170,8 @@ export async function toolTranscribe(
       sourceLang: args.sourceLang,
       title: args.title,
       duration: args.duration,
+      thumbnailPath: args.thumbnailPath,
+      captureThumbnail: args.captureThumbnail,
       options: { ...args.options, subtitlesOnly: true },
     });
     return { videoId: video.id, language, videos: 'uploaded' };
@@ -156,7 +203,7 @@ export async function toolGetStatus(
     `/videos/${encodeURIComponent(args.videoId)}/status`,
     { token },
   );
-  return status;
+  return withoutPoster(status);
 }
 
 export async function toolListVideos(ctx: ToolContext): Promise<Video[]> {
@@ -164,7 +211,7 @@ export async function toolListVideos(ctx: ToolContext): Promise<Video[]> {
   const { videos } = await apiRequest<{ videos: Video[] }>(server, '/videos', {
     token,
   });
-  return videos;
+  return videos.map(withoutPoster);
 }
 
 // -------------------------------------------------------------- download

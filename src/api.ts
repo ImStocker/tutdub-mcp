@@ -106,6 +106,12 @@ export interface Video {
   creditCost: number;
   filesAvailable: boolean;
   filesExpireAt: number | null;
+  /**
+   * Poster image the client captured at upload time, echoed back as a
+   * `data:image/...` URL. Tools strip it from responses: it can be up to
+   * 512 KB of base64 text that nothing can render on the wire.
+   */
+  thumbnail?: string | null;
   createdAt?: number;
   completedAt?: number | null;
 }

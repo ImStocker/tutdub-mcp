@@ -19,6 +19,12 @@ export interface Config {
   tokenName?: string;
   /** Account email, shown by `whoami` (informational only). */
   email?: string;
+  /**
+   * Auto-capture a poster thumbnail on video uploads (default true).
+   * Set to false to never gather thumbnails; the CLI flag
+   * `--no-thumbnail` and the TUTDUB_THUMBNAIL env var override this.
+   */
+  thumbnail?: boolean;
 }
 
 function configDir(): string {
@@ -64,6 +70,17 @@ export interface Settings {
   server: string;
   frontend: string;
   token: string | null;
+  /** Whether uploads auto-capture a poster thumbnail (default true). */
+  thumbnail: boolean;
+}
+
+/** Parses an on/off env value; null when unset or unrecognised. */
+function parseBool(value: string | undefined): boolean | null {
+  if (value === undefined) return null;
+  const v = value.trim().toLowerCase();
+  if (['1', 'true', 'yes', 'on'].includes(v)) return true;
+  if (['0', 'false', 'no', 'off'].includes(v)) return false;
+  return null;
 }
 
 /**
@@ -148,7 +165,12 @@ export function loadDotEnv(baseDir?: string): string[] {
 }
 
 export function getSettings(
-  overrides: { server?: string; frontend?: string } = {},
+  overrides: {
+    server?: string;
+    frontend?: string;
+    /** Per-invocation override for poster capture (flag > env > config). */
+    thumbnail?: boolean;
+  } = {},
 ): Settings {
   loadDotEnv(); // .env (TUTDUB_ENV_FILE or cwd) fills unset TUTDUB_* vars
   const cfg = loadConfig();
@@ -167,6 +189,10 @@ export function getSettings(
         DEFAULT_FRONTEND,
     ),
     token: process.env.TUTDUB_TOKEN ?? cfg.token ?? null,
+    thumbnail:
+      overrides.thumbnail ??
+      parseBool(process.env.TUTDUB_THUMBNAIL) ??
+      (typeof cfg.thumbnail === 'boolean' ? cfg.thumbnail : true),
   };
 }
 

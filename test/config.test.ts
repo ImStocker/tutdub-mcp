@@ -24,6 +24,7 @@ const TOUCHED = [
   'TUTDUB_SERVER_URL',
   'TUTDUB_FRONTEND_URL',
   'TUTDUB_TOKEN',
+  'TUTDUB_THUMBNAIL',
   'TUTDUB_CONFIG_HOME',
   'TUTDUB_ENV_FILE',
 ] as const;
@@ -179,5 +180,30 @@ describe('loadDotEnv / getSettings', () => {
     expect(settings.server).toBe(DEFAULT_SERVER);
     expect(settings.frontend).toBe(DEFAULT_FRONTEND);
     expect(settings.token).toBeNull();
+    expect(settings.thumbnail).toBe(true); // gather posters by default
+  });
+
+  test('thumbnail capture: flag > TUTDUB_THUMBNAIL > config file > default', () => {
+    // Default: on.
+    expect(getSettings().thumbnail).toBe(true);
+
+    // Config file can turn it off...
+    saveConfig({ thumbnail: false });
+    expect(getSettings().thumbnail).toBe(false);
+
+    // ...but the environment beats the config file...
+    process.env.TUTDUB_THUMBNAIL = 'true';
+    expect(getSettings().thumbnail).toBe(true);
+    process.env.TUTDUB_THUMBNAIL = 'off';
+    expect(getSettings().thumbnail).toBe(false);
+
+    // ...and a flag beats the environment.
+    expect(getSettings({ thumbnail: true }).thumbnail).toBe(true);
+
+    // Unrecognised values are ignored (config file value survives).
+    process.env.TUTDUB_THUMBNAIL = 'please';
+    expect(getSettings().thumbnail).toBe(false);
+    delete process.env.TUTDUB_THUMBNAIL;
+    expect(getSettings().thumbnail).toBe(false);
   });
 });

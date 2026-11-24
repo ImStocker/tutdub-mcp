@@ -6,10 +6,12 @@
  *   tutdub-mcp logout
  *   tutdub-mcp whoami
  *   tutdub-mcp upload <file> --lang es,fr [--title T] [--source-lang auto]
- *                        [--duration N] [--json]
+ *                        [--duration N] [--thumbnail IMG] [--no-thumbnail]
+ *                        [--json]
  *   tutdub-mcp dub <videoId> --lang es,fr
  *   tutdub-mcp translate <videoId> --lang es,fr   (synonym of dub)
  *   tutdub-mcp transcribe <file|videoId> [--lang source|es]
+ *                        [--thumbnail IMG] [--no-thumbnail]
  *   tutdub-mcp status <videoId> [--watch]
  *   tutdub-mcp list
  *   tutdub-mcp download <videoId> [--lang es] [--format video|audio|srt|original]
@@ -86,6 +88,17 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+/**
+ * Poster capture flag for one command: `--no-thumbnail` disables it,
+ * `--thumbnail` without a value forces it on; absent = the TUTDUB_THUMBNAIL
+ * / config-file setting (gather by default).
+ */
+function posterCaptureFlag(flags: ParsedArgs['flags']): boolean | undefined {
+  if (flags['no-thumbnail'] !== undefined) return false;
+  if (flags['thumbnail'] === true) return true;
+  return undefined;
+}
+
 function printJson(value: unknown): void {
   console.log(JSON.stringify(value, null, 2));
 }
@@ -143,8 +156,13 @@ Usage:
       Show the signed-in account.
 
   tutdub-mcp upload <file> --lang es,fr [--title T] [--source-lang auto]
-                           [--duration SECONDS] [--watch] [--json]
-      Upload a file and start dubbing. Prints the video id.
+                           [--duration SECONDS] [--thumbnail IMG | --no-thumbnail]
+                           [--watch] [--json]
+      Upload a file and start dubbing. Prints the video id. Captures a
+      poster thumbnail from the OS by default (Windows shell, macOS
+      QuickLook, Linux ffmpegthumbnailer when installed, falling back to
+      cover art embedded in the file); pass --no-thumbnail to skip it or
+      --thumbnail IMG to use your own image (jpg/png, <=512 KB).
 
   tutdub-mcp dub <videoId> --lang es,fr
       Add target languages to an uploaded video.
@@ -152,6 +170,7 @@ Usage:
       Synonym of "dub" (translate = dub video/audio).
 
   tutdub-mcp transcribe <file|videoId> [--lang source|es] [--watch] [--json]
+                       [--thumbnail IMG | --no-thumbnail]
       Generate subtitles only - no dubbed media. Without --lang (or with
       "source") the transcription comes out in the source language; pass a
       language code for a text translation. Uploads the file when given a
@@ -177,6 +196,7 @@ Environment / .env file:
   TUTDUB_SERVER_URL    API base (default https://tutdub.com/api/v1)
   TUTDUB_FRONTEND_URL  Frontend base (default https://tutdub.com/app)
   TUTDUB_TOKEN         Overrides the stored CLI token
+  TUTDUB_THUMBNAIL     Poster capture on upload: true/false (default true)
   TUTDUB_CONFIG_HOME   Overrides the config directory
   Precedence: flags > environment > .env > config file > defaults
 `;
@@ -235,6 +255,8 @@ async function main(): Promise<void> {
         sourceLang: str(flags, 'source-lang'),
         title: str(flags, 'title'),
         duration,
+        thumbnailPath: typeof flags['thumbnail'] === 'string' ? flags['thumbnail'] : undefined,
+        captureThumbnail: posterCaptureFlag(flags),
       });
       if (flags['json'] === true) printJson(video);
       else {
@@ -281,6 +303,8 @@ async function main(): Promise<void> {
         sourceLang: str(flags, 'source-lang'),
         title: str(flags, 'title'),
         duration,
+        thumbnailPath: typeof flags['thumbnail'] === 'string' ? flags['thumbnail'] : undefined,
+        captureThumbnail: posterCaptureFlag(flags),
       });
       if (flags['json'] === true) printJson(result);
       else {

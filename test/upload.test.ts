@@ -216,10 +216,73 @@ describe('uploadVideo (integration)', () => {
     expect(mock.state.started).toBeNull();
   });
 
+  test('sends an explicit thumbnail data URL in the start payload', async () => {
+    const file = makeWavFile(dir, 1);
+    const thumbnail = 'data:image/jpeg;base64,/9j/4AAQSkZJRg==';
+
+    await uploadVideo({
+      server: mock.url,
+      token: 'td_cli_test',
+      path: file,
+      languages: ['es'],
+      thumbnail,
+    });
+
+    const started = mock.state.started as { thumbnail?: string };
+    expect(started.thumbnail).toBe(thumbnail);
+  });
+
+  test('omits the thumbnail when the capture is skipped (thumbnail: null)', async () => {
+    const file = makeWavFile(dir, 1);
+
+    await uploadVideo({
+      server: mock.url,
+      token: 'td_cli_test',
+      path: file,
+      languages: ['es'],
+      thumbnail: null,
+    });
+
+    const started = mock.state.started as Record<string, unknown>;
+    expect(started.thumbnail).toBeUndefined();
+    expect(mock.state.completed).not.toBeNull();
+  });
+
+  test('never auto-captures a thumbnail for audio uploads', async () => {
+    const file = makeWavFile(dir, 1);
+
+    await uploadVideo({
+      server: mock.url,
+      token: 'td_cli_test',
+      path: file,
+      languages: ['es'],
+      // No thumbnail field -> auto-capture; audio must skip without
+      // ever probing the OS.
+    });
+
+    const started = mock.state.started as Record<string, unknown>;
+    expect(started.thumbnail).toBeUndefined();
+  });
+
+  test('rejects an explicit thumbnail that is not a data:image URL', async () => {
+    const file = makeWavFile(dir, 1);
+    await expect(
+      uploadVideo({
+        server: mock.url,
+        token: 'td_cli_test',
+        path: file,
+        languages: ['es'],
+        thumbnail: 'https://example.com/poster.jpg',
+      }),
+    ).rejects.toThrow(/data:image/);
+    // Rejected before the session was created.
+    expect(mock.state.started).toBeNull();
+  });
+
   test('toolTranscribe uploads with subtitlesOnly and empty languages', async () => {
     const file = makeWavFile(dir, 1);
     const ctx: ToolContext = {
-      settings: { server: mock.url, frontend: 'http://front', token: 'td_cli_test' },
+      settings: { server: mock.url, frontend: 'http://front', token: 'td_cli_test', thumbnail: true },
     };
 
     const result = await toolTranscribe(ctx, { path: file });
@@ -239,7 +302,7 @@ describe('uploadVideo (integration)', () => {
 
   test('toolTranscribe requests subtitles for an existing video', async () => {
     const ctx: ToolContext = {
-      settings: { server: mock.url, frontend: 'http://front', token: 'td_cli_test' },
+      settings: { server: mock.url, frontend: 'http://front', token: 'td_cli_test', thumbnail: true },
     };
 
     const result = await toolTranscribe(ctx, {

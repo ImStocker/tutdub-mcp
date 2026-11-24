@@ -100,6 +100,10 @@ tutdub-mcp logout
 # Upload a file (video or audio) and start dubbing; prints the media id
 tutdub-mcp upload ./lesson.mp4 --lang es,fr --watch
 
+# Poster image on video uploads (automatic by default)
+tutdub-mcp upload ./lesson.mp4 --lang es --no-thumbnail   # gather nothing
+tutdub-mcp upload ./lesson.mp4 --lang es --thumbnail ./poster.jpg  # own image
+
 # Add more languages later ("translate" is a synonym of "dub")
 tutdub-mcp dub <mediaid> --lang de
 tutdub-mcp translate <mediaid> --lang de
@@ -130,7 +134,9 @@ tutdub-mcp logout
 
 Common flags: `--json` (machine-readable output), `--server` / `--frontend`
 (per-command overrides), `--title`, `--source-lang`, `--duration`
-(override duration probing), `--dest`.
+(override duration probing), `--dest`, `--thumbnail IMG` /
+`--no-thumbnail` (poster capture for `upload`/`transcribe`, see
+[Poster thumbnails](#poster-thumbnails)).
 
 > **Note on audio-only dubbing:** pass an audio file (`.mp3`, `.wav`, …)
 > and it is processed as audio. Media id for audio called `videoId` on TutDub server
@@ -173,6 +179,11 @@ Upload options mirror the web app: `clean`, `clone`, `removeNoise`,
 `adaptVideo`, `adaptAudioTimeline` (default on), `emailNotify`,
 `scenario`.
 
+Video uploads also carry a poster thumbnail, gathered automatically by
+default; `upload_media` / `transcribe_media` accept `captureThumbnail:
+false` to skip it or `thumbnailPath` to supply your own image (see
+[Poster thumbnails](#poster-thumbnails)).
+
 ## Configuration
 
 Precedence: **flags > environment > `.env` > config file > defaults**.
@@ -182,8 +193,24 @@ Precedence: **flags > environment > `.env` > config file > defaults**.
 | `TUTDUB_SERVER_URL` | API base URL | `https://tutdub.com/api/v1` |
 | `TUTDUB_FRONTEND_URL` | Frontend base URL | `https://tutdub.com/app` |
 | `TUTDUB_TOKEN` | Overrides the stored CLI token | — |
+| `TUTDUB_THUMBNAIL` | Gather a poster thumbnail on video uploads (`true`/`false`) | `true` |
 | `TUTDUB_CONFIG_HOME` | Overrides the config directory | per-OS default |
 | `TUTDUB_ENV_FILE` | Explicit `.env` file to load | `.env` in the working directory |
+
+### Poster thumbnails
+
+Video uploads include a poster image — the same one the web app shows. It
+is gathered automatically by default, is best-effort, and never blocks an
+upload: if no image can be found, the upload simply proceeds without one.
+Audio files never get a poster.
+
+| Want to… | How |
+| --- | --- |
+| Skip it for one command | `--no-thumbnail` on `upload` / `transcribe` |
+| Never gather it | `TUTDUB_THUMBNAIL=false` (env or `.env`), or `"thumbnail": false` in `config.json` |
+| Use your own image | `--thumbnail ./poster.jpg` (jpg/png/…, ≤512 KB) |
+| Skip it from MCP | `captureThumbnail: false` on `upload_media` / `transcribe_media` |
+| Supply an image from MCP | `thumbnailPath: "/path/poster.jpg"` |
 
 ### `.env` file
 
