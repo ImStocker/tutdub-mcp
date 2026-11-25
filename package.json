@@ -1,6 +1,7 @@
 {
   "name": "tutdub-mcp",
-  "version": "1.0.1",
+  "version": "1.0.2",
+  "mcpName": "io.github.ImStocker/tutdub-mcp",
   "description": "MCP server and CLI client for the TutDub video dubbing service",
   "license": "MIT",
   "type": "module",
