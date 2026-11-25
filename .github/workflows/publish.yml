@@ -4,6 +4,14 @@
 #   3. publish the npm package via Trusted Publishing (OIDC — no token or
 #      repository secret involved)
 #   4. create a GitHub Release with the binaries and sha256sums.txt
+#   5. publish server.json to the MCP Registry via GitHub Actions OIDC —
+#      the interactive `mcp-publisher login github` flow cannot grant the
+#      io.github.ImStocker/* namespace (GitHub App tokens cannot read
+#      organization roles, registry issue #1468)
+#
+# Also runnable by hand (workflow_dispatch): the tag-only steps are skipped
+# and only the MCP Registry publish runs — used to publish v1.0.2 to the
+# registry after the fact without re-tagging.
 #
 # One-time setup on npmjs.com (package must exist — publish v1 manually
 # first if it does not): Settings -> Trusted publishing -> GitHub Actions
@@ -21,14 +29,18 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch: # manual run (MCP Registry publish only)
 
 permissions:
   contents: write # create the GitHub Release and upload assets
-  id-token: write # OIDC for npm Trusted Publishing (replaces NPM_TOKEN)
+  id-token: write # OIDC for npm Trusted Publishing AND the MCP Registry
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      # Pinned deliberately; never point at the mutable releases/latest URL.
+      MCP_PUBLISHER_VERSION: v1.8.16
     steps:
       - uses: actions/checkout@v7
 
@@ -46,6 +58,7 @@ jobs:
         run: bun install --frozen-lockfile
 
       - name: Verify tag matches package.json version
+        if: github.ref_type == 'tag'
         run: |
           TAG="${GITHUB_REF_NAME#v}"
           PKG="$(node -p "require('./package.json').version")"
@@ -61,14 +74,17 @@ jobs:
           bun run smoke
 
       - name: Build standalone binaries (windows / linux / macos)
+        if: github.ref_type == 'tag'
         run: bun run build:bin
 
       - name: Smoke-test the Linux binary
+        if: github.ref_type == 'tag'
         run: |
           chmod +x dist/tutdub-mcp-linux-x64
           ./dist/tutdub-mcp-linux-x64 help
 
       - name: Version the assets and write checksums
+        if: github.ref_type == 'tag'
         run: |
           cd dist
           for f in tutdub-mcp-windows-x64.exe tutdub-mcp-linux-x64 tutdub-mcp-macos-x64 tutdub-mcp-macos-arm64; do
@@ -78,6 +94,7 @@ jobs:
           ls -la
 
       - name: Publish to npm via Trusted Publishing (skip when the version already exists)
+        if: github.ref_type == 'tag'
         run: |
           NPM_V="$(npm --version)"
           echo "npm $NPM_V on $(node --version)"
@@ -96,6 +113,7 @@ jobs:
           fi
 
       - name: Create GitHub Release with the binaries
+        if: github.ref_type == 'tag'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -107,3 +125,58 @@ jobs:
               --title "tutdub-mcp $GITHUB_REF_NAME" \
               --generate-notes
           fi
+
+      # --- MCP Registry -----------------------------------------------------
+      # Deliberately after the GitHub Release: a registry hiccup must never
+      # block the binary release. Runs on tag pushes and manual dispatches.
+
+      - name: Set version in server.json (tag pushes only)
+        if: github.ref_type == 'tag'
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          jq --arg v "$VERSION" \
+            '.version = $v | .packages[].version = $v' \
+            server.json > server.tmp && mv server.tmp server.json
+
+      - name: Wait for npm metadata (version + mcpName) to be visible
+        run: |
+          VER="$(node -p "require('./package.json').version")"
+          WANT="$(node -p "require('./package.json').mcpName")"
+          for i in $(seq 1 12); do
+            GOT="$(npm view "tutdub-mcp@$VER" mcpName 2>/dev/null || true)"
+            if [ "$GOT" = "$WANT" ]; then
+              echo "tutdub-mcp@$VER is on npm with mcpName=$GOT"
+              exit 0
+            fi
+            echo "waiting for npm metadata ($i/12): got '${GOT:-<none>}'"
+            sleep 10
+          done
+          echo "::error::tutdub-mcp@$VER never appeared on npm with mcpName=$WANT"
+          exit 1
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Download and verify mcp-publisher
+        run: |
+          set -euo pipefail
+          os="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')"
+          archive="mcp-publisher_${os}_${arch}.tar.gz"
+          base_url="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+
+          curl --fail --location --silent --show-error --output "$archive" "$base_url/$archive"
+          curl --fail --location --silent --show-error --output "$archive.sigstore.json" "$base_url/$archive.sigstore.json"
+          cosign verify-blob \
+            --bundle "$archive.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com" \
+            "$archive"
+          tar xzf "$archive" mcp-publisher
+          rm -f "$archive" "$archive.sigstore.json"
+
+      - name: Authenticate to the MCP Registry (GitHub Actions OIDC)
+        run: ./mcp-publisher login github-oidc
+
+      - name: Publish server.json to the MCP Registry
+        run: ./mcp-publisher publish
